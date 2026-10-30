@@ -1,0 +1,101 @@
+# Local stack for course: PostgreSQL + the API.
+#   Start:  docker compose up -d --build
+#   Docs:   http://localhost:8000/docs
+#   Logs:   docker compose logs -f api
+#   Stop:   docker compose down        (data is kept in the "postgres-data" volume)
+#   Reset:  docker compose down -v     (deletes all data; tables are recreated on the next start)
+#
+# Only the database:  docker compose up -d postgres   (then run the API with uv, using .env)
+# From the host the database is at:
+#   postgresql+asyncpg://course:course@localhost:5434/course
+# (host port 5434, because 5432/5433 are often taken by other local Postgres instances;
+#  inside the compose network the API still uses postgres:5432)
+#
+# Tables come from the "schema" config below. Postgres runs it only when the volume is first
+# created, so after changing it run "docker compose down -v".
+
+services:
+  postgres:
+    image: postgres:17
+    container_name: course-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: course
+      POSTGRES_PASSWORD: course
+      POSTGRES_DB: course
+      TZ: UTC
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    configs:
+      - source: schema
+        target: /docker-entrypoint-initdb.d/001_schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U course -d course"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    container_name: course-api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://course:course@postgres:5432/course
+      DATABASE_ECHO: "false"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+
+configs:
+  # Mirrors AcademyRow and CourseModel. Replace with Alembic migrations later.
+  schema:
+    content: |
+      CREATE TABLE academies (
+          id                   uuid         PRIMARY KEY,
+          name                 varchar(200) NOT NULL,
+          contact_email        varchar(254) NOT NULL,
+          status               varchar(32)  NOT NULL,
+          rejection_reason     varchar(500),
+          is_verified          boolean      NOT NULL DEFAULT false,
+          verified_at_utc      timestamptz,
+          created_at_utc       timestamptz  NOT NULL,
+          last_modified_at_utc timestamptz  NOT NULL
+      );
+      CREATE INDEX ix_academies_status_created_at_utc ON academies (status, created_at_utc);
+      CREATE UNIQUE INDEX uq_academies_contact_email ON academies (contact_email);
+      CREATE UNIQUE INDEX uq_academies_name_lower ON academies (lower(name));
+
+      CREATE TABLE courses (
+          id                            uuid          PRIMARY KEY,
+          academy_id                     uuid          NOT NULL REFERENCES academies (id),
+          title                         varchar(200)  NOT NULL,
+          description                   text          NOT NULL,
+          category                   varchar(100)  NOT NULL,
+          photos                        json          NOT NULL,
+          syllabus                     json          NOT NULL,
+          included                      json          NOT NULL,
+          excluded                      json          NOT NULL,
+          venue_address               varchar(300)  NOT NULL,
+          class_time                  time          NOT NULL,
+          start_date                    date          NOT NULL,
+          end_date                      date          NOT NULL,
+          price_amount                  numeric(12,2) NOT NULL,
+          price_currency                varchar(3)    NOT NULL,
+          capacity                      integer       NOT NULL,
+          refund_tiers                  json          NOT NULL,
+          last_cancellation_days_before integer       NOT NULL,
+          status                        varchar(32)   NOT NULL,
+          created_at_utc                timestamptz   NOT NULL,
+          last_modified_at_utc          timestamptz   NOT NULL,
+          cancelled_at_utc              timestamptz,
+          archived_at_utc               timestamptz
+      );
+      CREATE INDEX ix_courses_academy_id_start_date ON courses (academy_id, start_date);
+      CREATE INDEX ix_courses_status_start_date ON courses (status, start_date);
