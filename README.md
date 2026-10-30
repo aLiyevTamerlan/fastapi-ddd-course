@@ -1,4 +1,4 @@
-# Marketplace backend - Architecture & Design Documentation
+# Course backend - Architecture & Design Documentation
 
 > A DDD-lite FastAPI backend for a course marketplace in Azerbaijan. Academies (training centers) list their
 > courses; students find upcoming courses and enroll. PostgreSQL stores all data.
